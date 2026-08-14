@@ -1,0 +1,48 @@
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+credentials.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+ENV/
+
+# --- Herramientas / cache ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node  ---
+node_modules/
+
+# --- Docker ---
+*.pid
+
+# --- Wireshark --- 
+*.pcap
+*.pcapng
+
+# --- Logs del chatbot / MCP ---
+*.log
+logs/
+
+# --- IDE / SO ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
