@@ -8,6 +8,7 @@
 # parecido a este, pero que reciba requests HTTP en vez de input().
 
 from core.chatbot import Chatbot, LLMClientError
+from core.logger import MCPLogger
 
 # Como la CLI es de un solo usuario, usamos un session_id fijo.
 SESSION_ID = "consola"
@@ -27,6 +28,8 @@ def run():
         print(f"No se pudo iniciar el chatbot: {e}")
         return
 
+    logger = MCPLogger()
+
     while True:
         try:
             user_text = input("Tú: ").strip()
@@ -44,6 +47,11 @@ def run():
         if user_text.lower() == "/reset":
             bot.reset_session(SESSION_ID)
             print("(contexto reiniciado)\n")
+            continue
+
+        if user_text.lower() == "/log":
+            logger.print_log()
+            print()
             continue
 
         try:
