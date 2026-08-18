@@ -14,6 +14,7 @@ en ese archivo).
 """
 
 import os
+import time
 import requests
 from dotenv import load_dotenv
 
@@ -29,6 +30,13 @@ GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # modelos en el free tier cambia con el tiempo).
 DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_MAX_OUTPUT_TOKENS = 1024
+
+# Reintentos automáticos ante 429 (límite de peticiones por minuto del
+# free tier). El free tier de Gemini es MUY restrictivo (a veces 5
+# peticiones/minuto), y una sola instrucción con varias herramientas
+# encadenadas puede consumir esa cuota fácilmente.
+MAX_RETRIES_ON_RATE_LIMIT = 3
+DEFAULT_RETRY_DELAY_SECONDS = 15
 
 
 class LLMClientError(Exception):
@@ -86,18 +94,41 @@ class LLMClient:
         if tools:
             payload["tools"] = tools
 
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=60)
-        except requests.RequestException as e:
-            raise LLMClientError(f"Fallo de red al llamar a la API: {e}")
-
-        if response.status_code != 200:
+        for attempt in range(MAX_RETRIES_ON_RATE_LIMIT + 1):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=60)
+            except requests.RequestException as e:
+                raise LLMClientError(f"Fallo de red al llamar a la API: {e}")
+ 
+            if response.status_code == 200:
+                return response.json()
+ 
+            if response.status_code == 429 and attempt < MAX_RETRIES_ON_RATE_LIMIT:
+                delay = self._parse_retry_delay(response) or DEFAULT_RETRY_DELAY_SECONDS
+                print(
+                    f"[llm_client] Límite de peticiones alcanzado, "
+                    f"reintentando en {delay:.0f}s... "
+                    f"(intento {attempt + 1}/{MAX_RETRIES_ON_RATE_LIMIT})"
+                )
+                time.sleep(delay)
+                continue
+ 
             raise LLMClientError(
                 f"La API respondió con error {response.status_code}: "
                 f"{response.text}"
             )
-
-        return response.json()
+    @staticmethod
+    def _parse_retry_delay(response) -> float | None:
+        """Busca el campo retryDelay que Gemini manda en el error 429
+        (ej. 'retryDelay': '55s') y regresa los segundos como número."""
+        try:
+            details = response.json()["error"]["details"]
+            for d in details:
+                if "retryDelay" in d:
+                    return float(d["retryDelay"].rstrip("s"))
+        except (KeyError, ValueError, TypeError):
+            pass
+        return None
 
     def get_text_response(self, contents: list[dict], **kwargs) -> str:
         """

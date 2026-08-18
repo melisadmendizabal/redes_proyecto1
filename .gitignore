@@ -41,6 +41,8 @@ node_modules/
 *.log
 logs/
 
+workspace/
+
 # --- IDE / SO ---
 .vscode/
 .idea/

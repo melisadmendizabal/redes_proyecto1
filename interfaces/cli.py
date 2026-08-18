@@ -18,18 +18,24 @@ BANNER = (
     "Comandos: /reset (borra el contexto), /salir (termina el programa)\n"
 )
 
-
-def run():
+# bot/logger son opcionales: si no te importa MCP y solo quieres
+# probar el chat simple, puedes seguir corriendo este archivo solo
+# (python -m interfaces.cli) y se crean por defecto sin servidores
+# conectados. Cuando main.py ya tiene todo armado (con MCP), te los
+# pasa aquí para no duplicar esa configuración.
+def run(bot: Chatbot = None, logger: MCPLogger = None):
     print(BANNER)
 
-    try:
-        bot = Chatbot()
-    except LLMClientError as e:
-        print(f"No se pudo iniciar el chatbot: {e}")
-        return
-
-    logger = MCPLogger()
-
+    if bot is None:
+        try:
+            bot = Chatbot()
+        except LLMClientError as e:
+            print(f"No se pudo iniciar el chatbot: {e}")
+            return
+ 
+    if logger is None:
+        logger = MCPLogger()
+        
     while True:
         try:
             user_text = input("Tú: ").strip()

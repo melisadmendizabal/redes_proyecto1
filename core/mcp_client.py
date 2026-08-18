@@ -15,6 +15,7 @@ Ciclo de vida que implementa:
 """
 
 import json
+import shutil
 import subprocess
 import threading
 
@@ -24,12 +25,18 @@ MCP_PROTOCOL_VERSION = "2025-11-25"
 
 
 class MCPClientError(Exception):
+    """Error de protocolo o de comunicación con un servidor MCP."""
     pass
 
 
 class MCPStdioClient:
     def __init__(self, command: list[str], server_name: str, logger: MCPLogger = None):
-       
+        """
+        command: lista de argv para levantar el servidor, ej.
+            ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/ruta"]
+        server_name: nombre corto para identificar este servidor en el log
+            (ej. "filesystem", "git", "my_server").
+        """
         self.command = command
         self.server_name = server_name
         self.logger = logger
@@ -37,10 +44,23 @@ class MCPStdioClient:
         self._next_id = 1
         self._lock = threading.Lock()  # una request a la vez por servidor
 
+    # --- Ciclo de vida del proceso ---
 
     def start(self):
+        # En Windows, comandos como "npx" o "npm" en realidad son
+        # archivos .cmd, y subprocess.Popen no los resuelve solo como sí
+        # lo hace la terminal. shutil.which() busca en el PATH respetando
+        # PATHEXT (.EXE, .CMD, .BAT, etc.) y regresa la ruta completa
+        # correcta. En Mac/Linux esto no cambia nada (ya funcionaba).
+        resolved_executable = shutil.which(self.command[0])
+        command = (
+            [resolved_executable] + self.command[1:]
+            if resolved_executable
+            else self.command
+        )
+
         self.process = subprocess.Popen(
-            self.command,
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -61,7 +81,7 @@ class MCPStdioClient:
             self.process.stdin.close()
             self.process.terminate()
 
-    # un JSON por línea, sin saltos de línea internos 
+    # --- Framing: un JSON por línea, sin saltos de línea internos ---
 
     def _write_line(self, message: dict):
         line = json.dumps(message, ensure_ascii=False)
@@ -81,10 +101,10 @@ class MCPStdioClient:
         self._next_id += 1
         return rid
 
-  
+    # --- Envío de mensajes JSON-RPC ---
 
     def send_request(self, method: str, params: dict = None) -> dict:
-        #Manda un request y bloquea hasta recibir su response
+        """Manda un request y bloquea hasta recibir su response."""
         with self._lock:
             req_id = self._next_request_id()
             message = {
@@ -117,13 +137,13 @@ class MCPStdioClient:
             return response.get("result", {})
 
     def send_notification(self, method: str, params: dict = None):
-        #Manda una notification (no espera ni lee respuesta
+        """Manda una notification (no espera ni lee respuesta)."""
         message = {"jsonrpc": "2.0", "method": method, "params": params or {}}
         if self.logger:
             self.logger.log_notification(self.server_name, message)
         self._write_line(message)
 
-    #  Métodos de alto nivel del protocolo MCP -
+    # --- Métodos de alto nivel del protocolo MCP ---
 
     def initialize(self, client_name: str = "mi-chatbot", client_version: str = "0.1.0") -> dict:
         result = self.send_request("initialize", {
@@ -146,7 +166,7 @@ class MCPStdioClient:
         })
 
 
-# requiere Node.js instalado
+# --- Prueba manual: requiere Node.js instalado (para npx) ---
 if __name__ == "__main__":
     logger = MCPLogger()
 
