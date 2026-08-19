@@ -35,6 +35,7 @@ DEFAULT_MAX_OUTPUT_TOKENS = 1024
 # free tier). El free tier de Gemini es MUY restrictivo (a veces 5
 # peticiones/minuto), y una sola instrucción con varias herramientas
 # encadenadas puede consumir esa cuota fácilmente.
+RETRYABLE_STATUS_CODES = {429, 503}
 MAX_RETRIES_ON_RATE_LIMIT = 3
 DEFAULT_RETRY_DELAY_SECONDS = 15
 
@@ -103,11 +104,16 @@ class LLMClient:
             if response.status_code == 200:
                 return response.json()
  
-            if response.status_code == 429 and attempt < MAX_RETRIES_ON_RATE_LIMIT:
-                delay = self._parse_retry_delay(response) or DEFAULT_RETRY_DELAY_SECONDS
+            if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES_ON_RATE_LIMIT:
+                if response.status_code == 429:
+                    delay = self._parse_retry_delay(response) or DEFAULT_RETRY_DELAY_SECONDS
+                    reason = "Límite de peticiones alcanzado"
+                else:  # 503: servidor saturado, backoff exponencial simple
+                    delay = DEFAULT_RETRY_DELAY_SECONDS * (attempt + 1)
+                    reason = "Servidor de Gemini saturado (503)"
+ 
                 print(
-                    f"[llm_client] Límite de peticiones alcanzado, "
-                    f"reintentando en {delay:.0f}s... "
+                    f"[llm_client] {reason}, reintentando en {delay:.0f}s... "
                     f"(intento {attempt + 1}/{MAX_RETRIES_ON_RATE_LIMIT})"
                 )
                 time.sleep(delay)
