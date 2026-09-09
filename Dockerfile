@@ -11,8 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY servers/ ./servers/
 
 # Cloud Run inyecta la variable de entorno PORT; remote_http.py ya la lee.
-ENV PORT=8080
-EXPOSE 8080
+# ENV PORT=8080
+EXPOSE 10000
 
 # Servidor de producción (gunicorn), no el servidor de desarrollo de Flask.
-CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 --threads 4 servers.pharmacy.remote_http:app
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-10000} --workers 1 --threads 4 servers.pharmacy.remote_http:app"]

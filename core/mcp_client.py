@@ -23,7 +23,24 @@ import requests
 
 from core.logger import MCPLogger
 
+import os
+import ssl
+from requests.adapters import HTTPAdapter
+
 MCP_PROTOCOL_VERSION = "2025-11-25"
+
+
+class _KeyLogAdapter(HTTPAdapter):
+    """HTTPAdapter que, si existe la variable de entorno SSLKEYLOGFILE,
+    hace que TLS guarde ahí las claves de sesión (para poder
+    descifrar el tráfico luego en Wireshark)."""
+    def init_poolmanager(self, *args, **kwargs):
+        context = ssl.create_default_context()
+        keylog_file = os.environ.get("SSLKEYLOGFILE")
+        if keylog_file:
+            context.keylog_filename = keylog_file
+        kwargs["ssl_context"] = context
+        return super().init_poolmanager(*args, **kwargs)
 
 
 class MCPClientError(Exception):
@@ -187,6 +204,8 @@ class MCPHttpClient:
         self.session_id: str | None = None
         self._next_id = 1
         self._lock = threading.Lock()
+        self._session = requests.Session()
+        self._session.mount("https://", _KeyLogAdapter())
 
     # --- Ciclo de vida: no hay proceso que lanzar, solo por paridad de interfaz ---
 
@@ -206,7 +225,7 @@ class MCPHttpClient:
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         try:
-            return requests.post(f"{self.base_url}/mcp", json=message, headers=headers, timeout=30)
+            return self._session.post(f"{self.base_url}/mcp", json=message, headers=headers, timeout=30)
         except requests.RequestException as e:
             raise MCPClientError(f"Fallo de red hacia el servidor remoto '{self.server_name}': {e}")
 

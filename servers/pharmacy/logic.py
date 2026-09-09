@@ -17,7 +17,7 @@ CATALOG = {
         "description": "Analgésico y antipirético, para dolor leve y fiebre.",
         "symptoms": ["dolor de cabeza", "fiebre", "dolor muscular"],
         "price": 15.0,
-        "stock": 50,
+        "stock": 15,
     },
     "ibuprofeno": {
         "description": "Antiinflamatorio no esteroideo, para dolor e inflamación.",
