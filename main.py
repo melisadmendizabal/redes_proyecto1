@@ -36,11 +36,20 @@ def build_mcp_manager(logger: MCPLogger) -> MCPManager:
         command=["python", "-m", "mcp_server_git", "--repository", WORKSPACE_DIR],
     )
 
-    # Tu servidor propio (farmacia).
-    manager.add_server(
-        server_name="pharmacy",
-        command=["python", "-m", "servers.pharmacy.local_stdio"],
-    )
+    # Tu servidor propio (farmacia). Si PHARMACY_REMOTE_URL está definida
+    # (por ejemplo, tras desplegarlo en Cloud Run), se usa la versión
+    # remota vía HTTP; si no, la local vía stdio. El chatbot no distingue
+    # una de otra: mcp_manager expone ambas con la misma interfaz.
+    remote_url = os.environ.get("PHARMACY_REMOTE_URL")
+    if remote_url:
+        print(f"Usando servidor de farmacia REMOTO: {remote_url}")
+        manager.add_http_server(server_name="pharmacy", base_url=remote_url)
+    else:
+        print("Usando servidor de farmacia LOCAL (stdio)")
+        manager.add_server(
+            server_name="pharmacy",
+            command=["python", "-m", "servers.pharmacy.local_stdio"],
+        )
 
     return manager
 

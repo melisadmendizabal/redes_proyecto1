@@ -19,6 +19,8 @@ import shutil
 import subprocess
 import threading
 
+import requests
+
 from core.logger import MCPLogger
 
 MCP_PROTOCOL_VERSION = "2025-11-25"
@@ -164,6 +166,120 @@ class MCPStdioClient:
             "name": name,
             "arguments": arguments or {},
         })
+
+
+class MCPHttpClient:
+    """
+    Cliente MCP para el transporte Streamable HTTP (servidores remotos).
+    Misma interfaz pública que MCPStdioClient (start, initialize,
+    list_tools, call_tool, close), para que MCPManager pueda usar
+    cualquiera de los dos sin distinguirlos.
+
+    Implementación simplificada: un único endpoint POST /mcp, modo de
+    respuesta única (sin SSE), y sesión manejada con el header
+    Mcp-Session-Id, tal como indica la spec 2025-11-25.
+    """
+
+    def __init__(self, base_url: str, server_name: str, logger: MCPLogger = None):
+        self.base_url = base_url.rstrip("/")
+        self.server_name = server_name
+        self.logger = logger
+        self.session_id: str | None = None
+        self._next_id = 1
+        self._lock = threading.Lock()
+
+    # --- Ciclo de vida: no hay proceso que lanzar, solo por paridad de interfaz ---
+
+    def start(self):
+        pass  # nada que hacer: el servidor ya está corriendo remotamente
+
+    def close(self):
+        pass  # simplificación para el alcance del proyecto: no se termina la sesión con DELETE
+
+    def _next_request_id(self) -> int:
+        rid = self._next_id
+        self._next_id += 1
+        return rid
+
+    def _post(self, message: dict):
+        headers = {"Content-Type": "application/json"}
+        if self.session_id:
+            headers["Mcp-Session-Id"] = self.session_id
+        try:
+            return requests.post(f"{self.base_url}/mcp", json=message, headers=headers, timeout=30)
+        except requests.RequestException as e:
+            raise MCPClientError(f"Fallo de red hacia el servidor remoto '{self.server_name}': {e}")
+
+    # --- Envío de mensajes JSON-RPC ---
+
+    def send_request(self, method: str, params: dict = None) -> dict:
+        with self._lock:
+            req_id = self._next_request_id()
+            message = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params or {}}
+
+            if self.logger:
+                self.logger.log_request(self.server_name, message)
+
+            response = self._post(message)
+            if response.status_code >= 400:
+                raise MCPClientError(
+                    f"HTTP {response.status_code} del servidor remoto en '{method}': {response.text}"
+                )
+
+            data = response.json()
+
+            if "error" in data:
+                if self.logger:
+                    self.logger.log_error(self.server_name, data)
+                raise MCPClientError(f"Error MCP en '{method}': {data['error']}")
+
+            if self.logger:
+                self.logger.log_response(self.server_name, data)
+
+            return data.get("result", {})
+
+    def send_notification(self, method: str, params: dict = None):
+        message = {"jsonrpc": "2.0", "method": method, "params": params or {}}
+        if self.logger:
+            self.logger.log_notification(self.server_name, message)
+        self._post(message)  # se espera 202 Accepted sin cuerpo; no hay nada que leer
+
+    # --- Métodos de alto nivel del protocolo MCP ---
+
+    def initialize(self, client_name: str = "mi-chatbot", client_version: str = "0.1.0") -> dict:
+        req_id = self._next_request_id()
+        message = {
+            "jsonrpc": "2.0", "id": req_id, "method": "initialize",
+            "params": {
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": client_name, "version": client_version},
+            },
+        }
+        if self.logger:
+            self.logger.log_request(self.server_name, message)
+
+        response = self._post(message)
+        if response.status_code >= 400:
+            raise MCPClientError(f"HTTP {response.status_code} al inicializar: {response.text}")
+
+        # Aquí es donde el transporte HTTP se diferencia del stdio: la
+        # sesión viaja en un header de la respuesta, no en el cuerpo.
+        self.session_id = response.headers.get("Mcp-Session-Id")
+
+        data = response.json()
+        if self.logger:
+            self.logger.log_response(self.server_name, data)
+
+        self.send_notification("notifications/initialized")
+        return data.get("result", {})
+
+    def list_tools(self) -> list[dict]:
+        result = self.send_request("tools/list")
+        return result.get("tools", [])
+
+    def call_tool(self, name: str, arguments: dict = None) -> dict:
+        return self.send_request("tools/call", {"name": name, "arguments": arguments or {}})
 
 
 # --- Prueba manual: requiere Node.js instalado (para npx) ---

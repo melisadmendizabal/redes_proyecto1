@@ -11,23 +11,23 @@ Orquesta varios servidores MCP a la vez. Se encarga de:
     "verlas" y decidir usarlas.
 """
 
-from core.mcp_client import MCPStdioClient, MCPClientError
+from core.mcp_client import MCPStdioClient, MCPHttpClient, MCPClientError
 from core.logger import MCPLogger
 
 
 class MCPManager:
     def __init__(self, logger: MCPLogger = None):
         self.logger = logger
-        self.clients: dict[str, MCPStdioClient] = {}       # server_name -> client
+        self.clients: dict = {}                             # server_name -> client (stdio o http)
         self.tools_by_server: dict[str, list[dict]] = {}    # server_name -> [tool, ...]
         self.tool_index: dict[str, str] = {}                # tool_name -> server_name
 
-    def add_server(self, server_name: str, command: list[str]) -> list[dict]:
+    def _register(self, server_name: str, client) -> list[dict]:
         """
-        Levanta un servidor MCP (subproceso), hace el handshake y registra
-        sus herramientas. Regresa la lista de herramientas descubiertas.
+        Hace el handshake y registra las herramientas de un cliente ya
+        construido (sin importar si es stdio o HTTP: ambos exponen la
+        misma interfaz start/initialize/list_tools/call_tool/close).
         """
-        client = MCPStdioClient(command=command, server_name=server_name, logger=self.logger)
         client.start()
         client.initialize()
 
@@ -49,6 +49,16 @@ class MCPManager:
             self.tool_index[tool["name"]] = server_name
 
         return tools
+
+    def add_server(self, server_name: str, command: list[str]) -> list[dict]:
+        """Registra un servidor MCP LOCAL (transporte stdio, subproceso)."""
+        client = MCPStdioClient(command=command, server_name=server_name, logger=self.logger)
+        return self._register(server_name, client)
+
+    def add_http_server(self, server_name: str, base_url: str) -> list[dict]:
+        """Registra un servidor MCP REMOTO (transporte Streamable HTTP)."""
+        client = MCPHttpClient(base_url=base_url, server_name=server_name, logger=self.logger)
+        return self._register(server_name, client)
 
     def call_tool(self, name: str, arguments: dict) -> dict:
         """Llama a una herramienta por nombre, sin que quien llama sepa
